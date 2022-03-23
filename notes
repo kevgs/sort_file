@@ -1,0 +1,50 @@
+Header order requirements are not cool. This doesn't compile:
+#include <seastar/core/seastar.hh>
+#include <seastar/core/file.hh>
+...
+seastar::open_file_dma(...);
+
+
+colors would be very helpful in seastar-addr2line
+
+
+You probably don't use lld linker: I've seen an error with it.
+
+
+Parrallel merge phase is roughly like this:
+1) take any sorted chunk file and find n-15 pivot values evenly distributed
+by it's position/index in a file.
+2) for every chunk file find positions/indexes in file using a binary search
+3) count values for every group between pivots in every file and sum them up
+4) use summed values to divide the final file into n groups
+5) now distribute groups between shard. Every shard knows intervals to read
+in any chunk file and interval to write in a final big sorted file and this
+phase could be parallelized
+
+I've used a binary heap data structure for a single-threaded merge phase.
+Usually linear search (std::min_elements) which is O(n) is the fastest for a
+small n. But in our case comparison is memcmp(a, b, 4096) and 4096 is a big
+number. That's why I've used a binary heap data structure because it allows
+to find the smallest element with O(log n) complexity. The less comparisons
+the better in this case.
+
+It's potentially beneficial to use std::assume_aligned<4096> to give compiler
+more info for optimization opportunity.
+
+My code needs more error handling. Some asserts should be replaced and more
+checks should be added.
+
+The allowed amount of memory sort_file can use should be an argument to a
+programm, not a hardcoded constant.
+
+Maximum amount of bytes to read shound be and argument too. My local
+experiments showed it matters a lot and seastar::file::disk_read_max_length()
+is not the best value for my environment.
+
+std::sort() of a big vector results in a reactor stall.
+
+Initially I started using future::then() and had issues with lambda data
+captures. Then I switched to coroutines and it felt much better. Also huge
+nesting disappeared.
+
+Some code could be improved with scatter-gather I/O.
